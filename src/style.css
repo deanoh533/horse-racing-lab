@@ -119,3 +119,16 @@ td input { width: 64px; padding: 3px 6px; }
 
 .chart-box { position: relative; height: 280px; }
 .chart-box.tall { height: 320px; }
+
+.top0 { margin-top: 0; margin-bottom: 12px; }
+.small-inline { font-size: 12px; }
+.record { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.record dt { color: var(--muted); }
+.record dd { margin: 0; text-align: right; font-weight: 600; }
+.record dd small { color: var(--muted); font-weight: 400; }
+.record .empty { grid-column: 1 / -1; color: var(--muted); font-weight: 400; text-align: left; }
+.pred-cell { color: var(--muted); }
+.pred-cell.fav { color: var(--accent); font-weight: 700; }
+.verdict { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 13px; }
+.verdict.hit { border-left: 3px solid #3cb44b; }
+.verdict.miss { border-left: 3px solid #e6194b; }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { type Horse, generateHorses } from '../src/sim/horse';
 import { runMonteCarlo } from '../src/sim/montecarlo';
 import { conditionFactor, simulateRace } from '../src/sim/race';
+import { addToRecord, emptyRecord, scoreRace, toPrediction, uniformBrier } from '../src/sim/predict';
 import { createRng } from '../src/sim/rng';
 
 function makeHorse(id: number, overrides: Partial<Horse> = {}): Horse {
@@ -98,5 +99,50 @@ describe('runMonteCarlo', () => {
     const winRate = (mc: typeof short, id: number) => mc.stats.find((s) => s.horse.id === id)!.winRate;
     expect(winRate(short, 0)).toBeGreaterThan(0.5);
     expect(winRate(long, 1)).toBeGreaterThan(0.5);
+  });
+});
+
+describe('승률 예측 채점', () => {
+  const horses = generateHorses(createRng(42), 8);
+  const race = simulateRace(horses, { distance: 1600, condition: 'good', seed: 1 });
+  const winnerId = race.results[0].horse.id;
+  const secondId = race.results[1].horse.id;
+
+  it('우승마를 확신한 완벽한 예측은 브라이어 0', () => {
+    const pred = new Map(horses.map((h) => [h.id, h.id === winnerId ? 1 : 0]));
+    const s = scoreRace(pred, race);
+    expect(s.favoriteId).toBe(winnerId);
+    expect(s.favoriteRank).toBe(1);
+    expect(s.winnerProb).toBe(1);
+    expect(s.brier).toBe(0);
+  });
+
+  it('균등 예측의 브라이어는 기준선과 같다', () => {
+    const pred = new Map(horses.map((h) => [h.id, 1 / 8]));
+    expect(scoreRace(pred, race).brier).toBeCloseTo(uniformBrier(8), 10);
+  });
+
+  it('기록을 누적한다', () => {
+    const pred = new Map(horses.map((h) => [h.id, h.id === secondId ? 0.6 : 0.4 / 7]));
+    const s = scoreRace(pred, race);
+    expect(s.favoriteRank).toBe(2);
+    const rec = addToRecord(addToRecord(emptyRecord(), s), s);
+    expect(rec.races).toBe(2);
+    expect(rec.favoriteWins).toBe(0);
+    expect(rec.favoriteTop3).toBe(2);
+    expect(rec.favoriteProbSum).toBeCloseTo(1.2, 10);
+  });
+
+  it('몬테카를로 예측은 독립 경주에서 보정이 맞는다 (예측 1위 승률 ≈ 실제 우승률)', () => {
+    const field = generateHorses(createRng(5), 6);
+    const pred = toPrediction(runMonteCarlo(field, { distance: 1400, condition: 'good', runs: 2000, baseSeed: 1_000_000 }));
+    let rec = emptyRecord();
+    for (let seed = 0; seed < 600; seed++) {
+      rec = addToRecord(rec, scoreRace(pred, simulateRace(field, { distance: 1400, condition: 'good', seed })));
+    }
+    const predicted = rec.favoriteProbSum / rec.races;
+    const actual = rec.favoriteWins / rec.races;
+    expect(Math.abs(predicted - actual)).toBeLessThan(0.07);
+    expect(rec.brierSum / rec.races).toBeLessThan(uniformBrier(6));
   });
 });
