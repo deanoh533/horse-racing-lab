@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Horse Racing Lab</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>🏇 Horse Racing Lab</h1>
+      <p class="sub">경주 시뮬레이션 · 결과 시각화 대시보드</p>
+    </header>
+
+    <main class="grid">
+      <section class="card controls">
+        <h2>경주 설정</h2>
+        <div class="form-row">
+          <label>거리
+            <select id="distance">
+              <option value="1000">1000m</option>
+              <option value="1200">1200m</option>
+              <option value="1400">1400m</option>
+              <option value="1600" selected>1600m</option>
+              <option value="1800">1800m</option>
+              <option value="2000">2000m</option>
+              <option value="2400">2400m</option>
+            </select>
+          </label>
+          <label>주로 상태
+            <select id="condition">
+              <option value="good">양호</option>
+              <option value="soft">다습</option>
+              <option value="heavy">불량</option>
+            </select>
+          </label>
+          <label>시드
+            <input id="seed" type="number" value="1" />
+          </label>
+        </div>
+        <div class="form-row">
+          <button id="run-race" class="primary">▶ 경주 시작</button>
+          <label class="inline">재생 속도
+            <select id="playback">
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="4" selected>4x</option>
+              <option value="8">8x</option>
+              <option value="0">즉시</option>
+            </select>
+          </label>
+        </div>
+        <hr />
+        <h2>몬테카를로 분석</h2>
+        <div class="form-row">
+          <label>반복 횟수
+            <input id="mc-runs" type="number" value="1000" min="10" max="20000" step="100" />
+          </label>
+          <button id="run-mc">📊 시뮬레이션 실행</button>
+        </div>
+        <p id="mc-status" class="muted"></p>
+      </section>
+
+      <section class="card roster">
+        <div class="card-head">
+          <h2>출전마</h2>
+          <div class="form-row compact">
+            <label class="inline">두수
+              <select id="field-size">
+                <option>6</option><option>7</option><option selected>8</option><option>9</option>
+                <option>10</option><option>11</option><option>12</option>
+              </select>
+            </label>
+            <label class="inline">시드 <input id="roster-seed" type="number" value="42" class="narrow" /></label>
+            <button id="regen">🎲 새로 뽑기</button>
+          </div>
+        </div>
+        <div class="table-wrap"><table id="roster-table"></table></div>
+        <p class="muted small">능력치는 직접 수정할 수 있습니다. 최고속도(m/s) · 지구력 · 가속력 · 안정성 · 불량주로 적응력(0–100)</p>
+      </section>
+
+      <section class="card race">
+        <div class="card-head">
+          <h2>경주</h2>
+          <span id="race-clock" class="clock">0.0s</span>
+        </div>
+        <div class="race-body">
+          <canvas id="track"></canvas>
+          <ol id="leaderboard" class="leaderboard"></ol>
+        </div>
+      </section>
+
+      <section class="card results">
+        <h2>경주 결과</h2>
+        <div class="table-wrap"><table id="result-table"><tbody><tr><td class="muted">경주를 시작하세요.</td></tr></tbody></table></div>
+      </section>
+
+      <section class="card speed">
+        <h2>구간별 속도 (km/h)</h2>
+        <div class="chart-box"><canvas id="speed-chart"></canvas></div>
+      </section>
+
+      <section class="card win">
+        <h2>승률 · 입상률</h2>
+        <div class="chart-box"><canvas id="win-chart"></canvas></div>
+      </section>
+
+      <section class="card rankdist">
+        <h2>순위 분포</h2>
+        <div class="chart-box tall"><canvas id="rank-chart"></canvas></div>
+      </section>
+
+      <section class="card mcstats">
+        <h2>몬테카를로 통계</h2>
+        <div class="table-wrap"><table id="mc-table"><tbody><tr><td class="muted">시뮬레이션을 실행하세요.</td></tr></tbody></table></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
