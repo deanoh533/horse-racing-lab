@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from .clogit import ConditionalLogit
+from .duck import load_duckdb
 from .evaluate import calibration_table, odds_implied_prob, race_metrics
 from .features import build_features
 from .kra import load_kra_csv, validate
@@ -36,6 +37,18 @@ FEATURE_LABELS = {
     "body_weight_change_abs": "마체중 변화폭",
     "gate_pct": "게이트 위치 (바깥쪽일수록 큼)",
     "market_log_prob": "시장 평가 (단승 배당)",
+    "h_rest_short": "휴양 짧음 (3주 미만)",
+    "h_rest_long": "휴양 김 (2~4개월)",
+    "h_rest_very_long": "휴양 매우 김 (4개월 이상)",
+    "h_late_speed_last3": "최근 3경주 막판 200m 속도 (경주 평균 대비)",
+    "h_early_pos_last5": "최근 5경주 초반 위치 (0 = 선두)",
+    "h_pop_last3": "최근 3경주 인기 순위 (0 = 1번 인기)",
+    "h_class_move": "등급 이동 (상금 기준, +면 상향)",
+    "h_dist_change_abs": "직전 경주 대비 거리 변화",
+    "h_same_dist_rank_pct": "같은 거리 과거 착순",
+    "is_mare": "암말",
+    "jk_recent_win": "기수 최근 60일 승률",
+    "tr_recent_win": "조교사 최근 60일 승률",
 }
 
 
@@ -62,7 +75,7 @@ def _fit(d: pd.DataFrame, feats: list[str], l2: float) -> ConditionalLogit:
     return ConditionalLogit(l2=l2).fit(d[feats].to_numpy(float), d["race_code"].to_numpy(), d["y"].to_numpy(), feats)
 
 
-def choose_l2(train: pd.DataFrame, feats: list[str], grid=(0.1, 1.0, 10.0, 100.0, 1000.0)) -> float:
+def choose_l2(train: pd.DataFrame, feats: list[str], grid=(1.0, 10.0, 100.0, 300.0, 1000.0, 3000.0, 10000.0)) -> float:
     """학습 기간의 마지막 20%로 정규화 강도를 고른다 (시험 기간은 건드리지 않음)."""
     inner_train, valid = split_by_date(train, None, 0.2)
     if valid["race_id"].nunique() < 20 or inner_train["race_id"].nunique() < 20:
@@ -127,17 +140,24 @@ def print_report(model: ConditionalLogit, report: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="마사회 경주 데이터로 승률 예측 모델 학습")
-    ap.add_argument("--csv", nargs="+", required=True, help="마사회 경주성적 CSV (glob 가능)")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--csv", nargs="+", help="마사회 경주성적 CSV (glob 가능)")
+    src.add_argument("--duckdb", help="race_entries·races 테이블이 있는 DuckDB 파일")
     ap.add_argument("--use-odds", action="store_true", help="단승 배당을 특징으로 사용")
     ap.add_argument("--test-from", help="이 날짜부터를 시험 기간으로 (YYYY-MM-DD). 기본: 마지막 20%%")
     ap.add_argument("--out", default="out/model.json")
     args = ap.parse_args()
 
-    paths = sorted({p for pat in args.csv for p in glob.glob(pat)})
-    if not paths:
-        raise SystemExit(f"CSV 파일을 찾지 못했습니다: {args.csv}")
-    df = load_kra_csv(paths)
-    print(f"데이터: 파일 {len(paths)}개 · {len(df):,}행 · {df['race_id'].nunique():,}경주 · 말 {df['horse_id'].nunique():,}두")
+    if args.duckdb:
+        df = load_duckdb(args.duckdb)
+        source = args.duckdb
+    else:
+        paths = sorted({p for pat in args.csv for p in glob.glob(pat)})
+        if not paths:
+            raise SystemExit(f"CSV 파일을 찾지 못했습니다: {args.csv}")
+        df = load_kra_csv(paths)
+        source = f"CSV {len(paths)}개"
+    print(f"데이터: {source} · {len(df):,}행 · {df['race_id'].nunique():,}경주 · 말 {df['horse_id'].nunique():,}두")
     for w in validate(df):
         print(f"  ⚠ {w}")
 

@@ -25,6 +25,11 @@ def build_features(df: pd.DataFrame, use_odds: bool = False) -> tuple[pd.DataFra
     sort_cols = ["date", "race_id"] + (["race_no"] if "race_no" in d else [])
     d = d.sort_values(sort_cols, kind="stable").reset_index(drop=True)
 
+    # DuckDB 정수 열의 빈 값(<NA>)이 비교 연산을 오염시키지 않도록 실수형으로 통일
+    for c in ("rank", "gate", "finish_time", "odds", "rating", "age", "burden_weight", "body_weight_change", "distance",
+              "late_200m", "early_position", "popularity", "purse"):
+        if c in d:
+            d[c] = pd.to_numeric(d[c], errors="coerce").astype(float)
     d["field_size"] = d.groupby("race_id")["horse_id"].transform("size")
     d["won"] = (d["rank"] == 1).astype(float)
     d["top3"] = (d["rank"] <= 3).astype(float)
@@ -60,6 +65,53 @@ def build_features(df: pd.DataFrame, use_odds: bool = False) -> tuple[pd.DataFra
         )
         feats.append("h_behind_last3")
 
+    # 휴양 기간 구간: 너무 짧거나 길면 불리한 경향
+    d["h_rest_short"] = (days < 21).astype(float)
+    d["h_rest_long"] = ((days > 60) & (days <= 120)).astype(float)
+    d["h_rest_very_long"] = (days > 120).astype(float)
+    feats += ["h_rest_short", "h_rest_long", "h_rest_very_long"]
+
+    def past_mean(col: str, window: int, default: float | None = None) -> pd.Series:
+        """같은 말의 직전 window경주 평균 (이번 경주 제외)."""
+        out = d.groupby("horse_id", sort=False)[col].transform(lambda s: s.shift(1).rolling(window, min_periods=1).mean())
+        return out.fillna(out.median() if default is None else default)
+
+    # 막판 200m: 같은 경주 평균 대비 몇 초 빨랐는지 (페이스·거리 영향 제거, 클수록 빠름)
+    if "late_200m" in d and d["late_200m"].notna().any():
+        d["late_rel"] = d.groupby("race_id")["late_200m"].transform("mean") - d["late_200m"]
+        d["h_late_speed_last3"] = past_mean("late_rel", 3, 0.0)
+        feats.append("h_late_speed_last3")
+
+    # 초반 위치 (0 = 선두): 선행형인지 추입형인지
+    if "early_position" in d and d["early_position"].notna().any():
+        d["early_pct"] = ((d["early_position"] - 1) / (d["field_size"] - 1).clip(lower=1)).clip(0, 1)
+        d["h_early_pos_last5"] = past_mean("early_pct", 5, 0.5)
+        feats.append("h_early_pos_last5")
+
+    # 과거 경주에서 시장이 매긴 인기 (0 = 1번 인기). 이번 경주 배당은 쓰지 않는다
+    if "popularity" in d and d["popularity"].notna().any():
+        d["pop_pct"] = ((d["popularity"] - 1) / (d["field_size"] - 1).clip(lower=1)).clip(0, 1)
+        d["h_pop_last3"] = past_mean("pop_pct", 3, 0.5)
+        feats.append("h_pop_last3")
+
+    # 등급 이동: 직전 경주 대비 1착 상금 비율의 로그 (+면 더 높은 수준의 경주로 올라감)
+    if "purse" in d and d["purse"].notna().any():
+        prev_purse = d.groupby("horse_id", sort=False)["purse"].shift(1)
+        d["h_class_move"] = np.log(d["purse"] / prev_purse).fillna(0)
+        feats.append("h_class_move")
+
+    # 거리 변화와 같은 거리 성적
+    if "distance" in d and d["distance"].notna().any():
+        prev_dist = d.groupby("horse_id", sort=False)["distance"].shift(1)
+        d["h_dist_change_abs"] = np.abs(np.log(d["distance"] / prev_dist)).fillna(0)
+        same = d.groupby(["horse_id", "distance"], sort=False)["rank_pct"]
+        d["h_same_dist_rank_pct"] = same.transform(lambda s: s.shift(1).expanding().mean()).fillna(0.5)
+        feats += ["h_dist_change_abs", "h_same_dist_rank_pct"]
+
+    if "sex" in d:
+        d["is_mare"] = (d["sex"].astype(str) == "암").astype(float)
+        feats.append("is_mare")
+
     # ---- 기수·조교사: 전날까지 누적 승률 ----
     for col, name in (("jockey", "jk"), ("trainer", "tr")):
         if col not in d:
@@ -72,6 +124,20 @@ def build_features(df: pd.DataFrame, use_odds: bool = False) -> tuple[pd.DataFra
         d[f"{name}_win_rate"] = _smoothed(d["prev_wins"], d["prev_rides"], base_win, PEOPLE_PRIOR_STRENGTH)
         d = d.drop(columns=["prev_wins", "prev_rides"])
         feats.append(f"{name}_win_rate")
+
+        # 최근 60일(전날까지) 승률: 요즘 컨디션
+        daily = daily.set_index("date")
+        recent = (
+            daily.groupby(col)[["wins", "rides"]]
+            .rolling("60D", closed="left")
+            .sum()
+            .reset_index()
+            .rename(columns={"wins": "r_wins", "rides": "r_rides"})
+        )
+        d = d.merge(recent, on=[col, "date"], how="left")
+        d[f"{name}_recent_win"] = _smoothed(d["r_wins"].fillna(0), d["r_rides"].fillna(0), base_win, PEOPLE_PRIOR_STRENGTH)
+        d = d.drop(columns=["r_wins", "r_rides"])
+        feats.append(f"{name}_recent_win")
 
     # ---- 경주 내 상대값 (같은 경주 말들과 비교) ----
     def rel(col: str) -> pd.Series:
@@ -86,7 +152,9 @@ def build_features(df: pd.DataFrame, use_odds: bool = False) -> tuple[pd.DataFra
         d["body_weight_change_abs"] = d["body_weight_change"].abs().fillna(0)
         feats.append("body_weight_change_abs")
     if "gate" in d and d["gate"].notna().any():
-        d["gate_pct"] = ((d["gate"] - 1) / (d["field_size"] - 1).clip(lower=1)).fillna(0.5)
+        # 출전 취소로 번호가 비면 게이트 번호가 두수보다 클 수 있어, 경주 안에서의 순서를 쓴다
+        gate_order = d.groupby("race_id")["gate"].rank(method="first")
+        d["gate_pct"] = ((gate_order - 1) / (d["field_size"] - 1).clip(lower=1)).fillna(0.5)
         feats.append("gate_pct")
 
     # ---- 시장 평가 (단승 배당) ----

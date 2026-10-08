@@ -29,6 +29,10 @@ OPTIONAL = [
     "rating",  # 레이팅
     "odds",  # 단승식 배당률 (경주 직전 시장 평가)
     "finish_time",  # 경주 기록 (초)
+    "late_200m",  # 마지막 200m 기록 (초)
+    "early_position",  # 초반(출발 후 200m) 위치 순위
+    "popularity",  # 인기 순위 (1 = 최고 인기)
+    "purse",  # 1착 상금 (경주 수준의 척도)
 ]
 
 COLUMNS = REQUIRED + OPTIONAL

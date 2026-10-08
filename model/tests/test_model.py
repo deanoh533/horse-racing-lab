@@ -120,3 +120,37 @@ def test_race_metrics_완벽한_예측():
     m = race_metrics(np.array([1.0, 0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0, 1.0]), np.array([0, 0, 1, 1]))
     assert m["top1_accuracy"] == 1.0
     assert m["brier"] == 0.0
+
+
+def test_duckdb_로더(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    from hrl.duck import load_duckdb
+
+    path = tmp_path / "t.duckdb"
+    with duckdb.connect(str(path)) as con:
+        con.execute("create table races (race_date bigint, meet bigint, rc_no bigint, rc_dist bigint, track varchar, chaksun1 varchar)")
+        con.execute("insert into races values (20240106, 1, 1, 1200, '건조 (3%)', '33000000'), (20240107, 1, 1, 1200, NULL, NULL)")
+        cols = (
+            "race_date bigint, meet bigint, rc_no bigint, pthr_no bigint, hr_no varchar, hr_name varchar, ag bigint, gndr varchar,"
+            "burd_wgt double, ratg bigint, jcky_nm varchar, trar_nm varchar, rc_dist bigint, ord bigint, rc_time double,"
+            "wg_hr bigint, wg_hr_diff hugeint, win_odds double, popularity bigint, se_g1f_acc_time double, bu_g1f_acc_time double,"
+            "sj_s1f_ord bigint, bu_s1f_ord bigint"
+        )
+        con.execute(f"create table race_entries ({cols})")
+        rows = [
+            # 결과 있는 경주: 1·2위, 출전 취소(순위·기록 없음)
+            (20240106, 1, 1, 1, "A", "가", 3, "수", 55, 40, "(-1)김기수", "박조교", 1200, 1, 72.5, 470, 2, 2.1, 1, 59.0, None, 1, None),
+            (20240106, 1, 1, 2, "B", "나", 4, "암", 54, 35, "이기수", "최조교", 1200, 2, 73.0, 460, -1, 5.0, 2, 59.3, None, 2, None),
+            (20240106, 1, 1, 3, "C", "다", 4, "거", 54, 30, "정기수", "최조교", 1200, None, None, 480, 0, None, None, None, None, None, None),
+            # 예정 경주 (결과 없음)
+            (20240107, 1, 1, 1, "A", "가", 3, "수", 55, 40, "김기수", "박조교", 1200, None, None, 471, 1, 3.0, None, None, None, None, None),
+        ]
+        con.executemany(f"insert into race_entries values ({','.join(['?'] * 23)})", rows)
+
+    df = load_duckdb(path)
+    assert sorted(df["horse_id"]) == ["A", "B"]  # 취소마·예정 경주 제외
+    assert df["race_id"].iloc[0] == "서울-2024-01-06-1"
+    assert set(df["jockey"]) == {"김기수", "이기수"}  # 감량 표시 제거
+    assert df.loc[df["horse_id"] == "A", "late_200m"].iloc[0] == pytest.approx(13.5)
+    assert df["purse"].iloc[0] == 33_000_000
+    assert len(load_duckdb(path, include_upcoming=True)) == 3
